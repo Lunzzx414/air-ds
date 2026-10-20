@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIR SOC - Automated Incident Response Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        soc: {
+                            bg: '#090d16',
+                            card: '#111827',
+                            border: '#1f293d',
+                            accent: '#10b981',
+                            alert: '#f43f5e',
+                            warning: '#f59e0b',
+                            info: '#3b82f6',
+                            cyber: '#00f0ff'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+                        sans: ['Inter', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tabId).classList.add('active');
+            document.getElementById('btn-' + tabId).classList.add('active');
+        }
+
+        function simulateAttack() {
+            const vectors = ["Network Vector", "Hardware Vector", "File Vector", "Behavioral Vector"];
+            const attacks = ["DDOS_SYN_FLOOD", "IPMI_VOLTAGE_SPIKE", "HASH_MISMATCH", "DNN_ANOMALY_SPIKE"];
+            const randVec = vectors[Math.floor(Math.random() * vectors.length)];
+            const randAtk = attacks[Math.floor(Math.random() * attacks.length)];
+
+            const tbody = document.getElementById('incident-table');
+            const timeStr = new Date().toTimeString().split(' ')[0];
+            const row = document.createElement('tr');
+            row.style.background = "rgba(239, 68, 68, 0.1)";
+            row.innerHTML = `
+                <td style="color:#9ca3af;">${timeStr}</td>
+                <td><span class="tag-critical">CRITICAL</span></td>
+                <td style="font-weight:bold; color:#fff;">${randAtk} <span style="font-size:9px; color:#10b981;">[${randVec}]</span></td>
+                <td class="text-red">192.168.1.189</td>
+                <td>auth-gateway-01</td>
+                <td class="text-green">🛡️ Automated Playbook Executed</td>
+            `;
+            tbody.insertBefore(row, tbody.firstChild);
+
+            const term = document.getElementById('raw-terminal');
+            if (term) {
+                const log = document.createElement('div');
+                log.style.color = "#f59e0b";
+                log.innerText = `[${timeStr}] [ALERT] Detected ${randAtk} via ${randVec}. Playbook triggered.`;
+                term.insertBefore(log, term.firstChild);
+            }
+
+            let t = document.getElementById('metric-threats');
+            if (t) t.innerText = parseInt(t.innerText) + 1;
+        }
+
+        // --- LIVE BACKEND API FUNCTIONS ---
+
+       async function evaluateDNNModel() {
+    try {
+        const res = await fetch('http://localhost:8000/api/v1/detect/dnn-anomaly', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cpu_usage: 89.4, gpu_usage: 78.2, ram_usage: 91.0, network_pps: 320.5 })
+        });
+        const result = await res.json();
+        
+        // Mengganti alert() standar dengan UI Modal Kustom
+        const dnnContent = `
+            <p><strong class="text-cyan-400">Status:</strong> ${result.status}</p>
+            <p><strong class="text-slate-400">Model:</strong> ${result.model || 'ResourceAutoencoder_v2'}</p>
+            <p><strong class="text-slate-400">Reconstruction MSE Loss:</strong> ${result.reconstruction_mse_loss}</p>
+            <p><strong class="text-amber-400">Action:</strong> ${result.action_triggered || 'None'}</p>
+        `;
+        showCustomModal("DNN Autoencoder Analysis", dnnContent);
+
+    } catch (err) {
+        showCustomModal("Error", "<p class='text-rose-400'>Failed to connect to FastAPI backend for DNN endpoint.</p>");
+    }
+}
+async function runRealFIMAudit() {
+    try {
+        const res = await fetch('http://localhost:8000/api/v1/detect/fim-audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_path: "/app/main.py", current_hash: "8f4c29b1029481a7bcf89104bf7c8911", trigger_mode: "hash_change" })
+        });
+        const result = await res.json();
+        
+        // Mengganti alert() standar dengan UI Modal Kustom
+        const fimContent = `
+            <p><strong class="text-cyan-400">Trigger Mode:</strong> ${result.trigger_mode.toUpperCase()}</p>
+            <p><strong class="text-slate-400">File Path:</strong> ${result.file_path || '/app/main.py'}</p>
+            <p><strong class="text-rose-400">Tamper Detected:</strong> ${result.tamper_detected}</p>
+            <p><strong class="text-emerald-400">Playbook Response:</strong> ${result.playbook_response}</p>
+        `;
+        showCustomModal("File Integrity Monitoring (FIM)", fimContent);
+
+    } catch (err) {
+        showCustomModal("Error", "<p class='text-rose-400'>Failed to connect to FastAPI backend for FIM endpoint.</p>");
+    }
+}
+    </script>
+    <!-- Chart.js for SOC Metrics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        
+        body {
+            background-color: #060911;
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Neon Glow Effects */
+        .glow-red {
+            box-shadow: 0 0 15px rgba(244, 63, 94, 0.35);
+        }
+        .glow-green {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.35);
+        }
+        .glow-cyber {
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.25);
+        }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1f293d;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #374151;
+        }
+
+        /* Scanline Overlay for Cyberpunk Vibe */
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 3px, 6px 100%;
+            pointer-events: none;
+        }
+    </style>
+    <!-- Custom Alert/Modal Popup Kustom SOC -->
+<div id="customModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl p-6 max-w-md w-full shadow-2xl relative">
+        <div class="flex items-center gap-3 mb-4">
+            <div id="modalIcon" class="p-2 rounded-lg bg-cyan-500/20 text-cyan-400">🛡️</div>
+            <h3 id="modalTitle" class="text-lg font-bold text-white tracking-wide">Security Notification</h3>
+        </div>
+        <div id="modalBody" class="text-sm text-slate-300 space-y-2 mb-6 bg-slate-950/50 p-4 rounded-lg border border-slate-800">
+            <!-- Konten hasil dinamis akan masuk ke sini -->
+        </div>
+        <div class="flex justify-end">
+            <button onclick="closeCustomModal()" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold rounded-lg transition">
+                Close / Acknowledge
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Fungsi pengendali modal kustom
+    function showCustomModal(title, content, type = 'info') {
+        document.getElementById('modalTitle').innerText = title;
+        document.getElementById('modalBody').innerHTML = content;
+        document.getElementById('customModal').classList.remove('hidden');
+    }
+
+    function closeCustomModal() {
+        document.getElementById('customModal').classList.add('hidden');
+    }
+</script>
+</head>
+<body class="min-h-screen flex flex-col bg-[#060911] text-slate-200 antialiased relative selection:bg-rose-500 selection:text-white">
+    <div class="fixed inset-0 scanlines z-50 opacity-40"></div>
+
+    <!-- Header / Top Status Bar -->
+    <header class="border-b border-soc-border bg-soc-card/90 backdrop-blur sticky top-0 z-40 px-4 py-3">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            
+            <!-- Brand & Status -->
+            <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
+                        <i data-lucide="shield-check" class="w-6 h-6 animate-pulse"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h1 class="font-bold text-lg tracking-wider text-white font-mono">AIR // SOC CONSOLE</h1>
+                            <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">DEFENSIVE SHIELD ACTIVE</span>
+                        </div>
+                        <p class="text-xs text-slate-400">Automated Incident Response Engine v1.0.0</p>
+                    </div>
+                </div>
+
+                <!-- API Connection Badge -->
+                <div id="apiStatusBadge" class="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span>API: CONNECTED</span>
+                </div>
+            </div>
+
+            <!-- Top Security Metrics KPI Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full md:w-auto font-mono text-xs">
+                <div class="bg-soc-bg border border-soc-border p-2.5 rounded-lg flex flex-col">
+                    <span class="text-slate-400 text-[10px] uppercase">Firewall Rules</span>
+                    <span id="metricFirewall" class="text-base font-bold text-emerald-400">3 ACTIVE</span>
+                </div>
+                <div class="bg-soc-bg border border-soc-border p-2.5 rounded-lg flex flex-col">
+                    <span class="text-slate-400 text-[10px] uppercase">Threats Neutralized</span>
+                    <span id="metricNeutralized" class="text-base font-bold text-rose-400">14</span>
+                </div>
+                <div class="bg-soc-bg border border-soc-border p-2.5 rounded-lg flex flex-col">
+                    <span class="text-slate-400 text-[10px] uppercase">MTTR (Avg)</span>
+                    <span id="metricMTTR" class="text-base font-bold text-cyan-400">1.18s</span>
+                </div>
+                <div class="bg-soc-bg border border-soc-border p-2.5 rounded-lg flex flex-col">
+                    <span class="text-slate-400 text-[10px] uppercase">Containers Isolated</span>
+                    <span id="metricIsolated" class="text-base font-bold text-amber-400">2</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+
+        <!-- Top Section: Visual Charts & Interactive Attack Simulator -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Visual Metric 1: Attack Frequency Bar Chart -->
+            <div class="bg-soc-card border border-soc-border rounded-xl p-4 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-300 font-mono flex items-center gap-2">
+                        <i data-lucide="bar-chart-3" class="w-4 h-4 text-cyan-400"></i> Attack Vector Frequency
+                    </h2>
+                </div>
+                <div class="flex-1 min-h-[180px] relative">
+                    <canvas id="attackTypeChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Visual Metric 2: Severity Distribution Pie Chart -->
+            <div class="bg-soc-card border border-soc-border rounded-xl p-4 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-300 font-mono flex items-center gap-2">
+                        <i data-lucide="pie-chart" class="w-4 h-4 text-rose-400"></i> Severity Distribution
+                    </h2>
+                </div>
+                <div class="flex-1 min-h-[180px] relative">
+                    <canvas id="severityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Interactive Attack Simulator Box -->
+            <div class="bg-soc-card border border-soc-border rounded-xl p-4 flex flex-col justify-between border-l-4 border-l-rose-500">
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-sm font-semibold uppercase tracking-wider text-rose-400 font-mono flex items-center gap-2">
+                            <i data-lucide="zap" class="w-4 h-4"></i> Attack Simulator
+                        </h2>
+                        <span class="text-[10px] font-mono text-slate-400">TEST TRIGGER</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mb-4">Simulate external attack vectors to trigger real-time detection & automated remediation playbooks.</p>
+                    
+                    <div class="space-y-2 font-mono text-xs">
+                        <div>
+                            <label class="block text-slate-400 text-[10px] mb-1">TARGET ATTACK VECTOR</label>
+                            <select id="simAttackType" class="w-full bg-soc-bg border border-soc-border rounded p-2 text-slate-200 focus:outline-none focus:border-rose-500">
+                                <option value="SSH_BRUTE_FORCE">SSH Brute Force Attack</option>
+                                <option value="SQL_INJECTION">SQL Injection Query</option>
+                                <option value="DDOS_SYN_FLOOD">DDoS SYN Flood</option>
+                                <option value="MALWARE_UPLOAD">Malicious Binary Upload</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-slate-400 text-[10px] mb-1">SEVERITY LEVEL</label>
+                                <select id="simSeverity" class="w-full bg-soc-bg border border-soc-border rounded p-2 text-slate-200 focus:outline-none focus:border-rose-500">
+                                    <option value="CRITICAL">CRITICAL</option>
+                                    <option value="HIGH" selected>HIGH</option>
+                                    <option value="MEDIUM">MEDIUM</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 text-[10px] mb-1">TARGET ASSET</label>
+                                <input id="simTarget" type="text" value="auth-gateway-01" class="w-full bg-soc-bg border border-soc-border rounded p-2 text-slate-200 focus:outline-none focus:border-rose-500">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-soc-border/50 flex gap-2">
+                    <button id="btnTriggerAttack" onclick="triggerSimulatedAttack()" class="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-mono font-semibold py-2 px-3 rounded text-xs transition flex items-center justify-center gap-2 glow-red">
+                        <i data-lucide="crosshair" class="w-4 h-4"></i> EXECUTE ATTACK
+                    </button>
+                    <button onclick="toggleAutoAttack()" id="btnAutoSim" class="bg-soc-bg border border-soc-border hover:bg-slate-800 text-slate-300 font-mono text-xs py-2 px-3 rounded transition">
+                        AUTO: OFF
+                    </button>
+                    <button onclick="evaluateDNNModel()" class="bg-blue-600 hover:bg-blue-500 text-white font-mono font-semibold py-2 px-3 rounded text-xs">
+    TEST DNN MODEL
+</button>
+<button onclick="runRealFIMAudit()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-semibold py-2 px-3 rounded text-xs">
+    RUN FIM AUDIT
+</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Section: Real-time Live Threat Detection Feed -->
+        <div class="bg-soc-card border border-soc-border rounded-xl p-4 flex flex-col">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-soc-border">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="activity" class="w-5 h-5 text-rose-500 animate-pulse"></i>
+                    <h2 class="text-base font-semibold font-mono tracking-wider text-white">LIVE THREAT DETECTION FEED</h2>
+                    <span id="threatCountBadge" class="bg-rose-500/20 text-rose-400 text-xs px-2 py-0.5 rounded font-mono border border-rose-500/30">14 ALERTS</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs font-mono text-slate-400">
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-500"></span> CRITICAL</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span> HIGH</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-cyan-500"></span> MEDIUM</span>
+                </div>
+            </div>
+
+            <!-- Threat Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs font-mono">
+                    <thead class="bg-soc-bg/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-soc-border">
+                        <tr>
+                            <th class="p-3">Timestamp</th>
+                            <th class="p-3">Severity</th>
+                            <th class="p-3">Attack Vector</th>
+                            <th class="p-3">Source IP</th>
+                            <th class="p-3">Target Asset</th>
+                            <th class="p-3">Automated Playbook Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="threatFeedBody" class="divide-y divide-soc-border/50">
+                        <!-- Dynamic Threat Logs Will Be Inserted Here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Bottom Section: Active Containment Controls (Firewall & Docker Quarantines) -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- Blocked IP Rules Table -->
+            <div class="bg-soc-card border border-soc-border rounded-xl p-4">
+                <div class="flex items-center justify-between mb-3 pb-2 border-b border-soc-border">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-200 font-mono flex items-center gap-2">
+                        <i data-lucide="shield-alert" class="w-4 h-4 text-emerald-400"></i> Active Firewall Blocklist
+                    </h2>
+                    <span class="text-xs font-mono text-slate-400">AUTOMATED IP TABLES</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-soc-bg text-slate-400 uppercase text-[10px]">
+                            <tr>
+                                <th class="p-2">Blocked IP</th>
+                                <th class="p-2">Reason</th>
+                                <th class="p-2">Rule Age</th>
+                                <th class="p-2 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blockedIpTable" class="divide-y divide-soc-border/50">
+                            <!-- Blocked IPs populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Quarantined Containers Table -->
+            <div class="bg-soc-card border border-soc-border rounded-xl p-4">
+                <div class="flex items-center justify-between mb-3 pb-2 border-b border-soc-border">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-200 font-mono flex items-center gap-2">
+                        <i data-lucide="box" class="w-4 h-4 text-amber-400"></i> Quarantined Containers
+                    </h2>
+                    <span class="text-xs font-mono text-slate-400">DOCKER ISOLATION API</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-soc-bg text-slate-400 uppercase text-[10px]">
+                            <tr>
+                                <th class="p-2">Container ID / Name</th>
+                                <th class="p-2">Status</th>
+                                <th class="p-2">Trigger</th>
+                                <th class="p-2 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="containerTable" class="divide-y divide-soc-border/50">
+                            <!-- Quarantined Containers populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Console Log Notification Banner -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+    <!-- Application Script Logic -->
+    <script>
+        // System State
+        let threats = [];
+        let autoSimInterval = null;
+        let blockedIPs = [
+            { ip: '192.168.1.105', reason: 'SSH_BRUTE_FORCE', age: '2m ago' },
+            { ip: '45.33.32.156', reason: 'DDOS_SYN_FLOOD', age: '14m ago' },
+            { ip: '185.220.101.5', reason: 'SQL_INJECTION', age: '1h ago' }
+        ];
+        let isolatedContainers = [
+            { id: 'web-srv-c01', status: 'PAUSED', trigger: 'SQL Injection Spike' },
+            { id: 'auth-gateway-01', status: 'ISOLATED', trigger: 'Malware Execution' }
+        ];
+
+        // Chart Instances
+        let attackChartInstance = null;
+        let severityChartInstance = null;
+
+        // Initialize Lucide Icons & Components on Load
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            initCharts();
+            seedInitialData();
+            renderTables();
+            
+            // Poll FastAPI local backend status
+            checkBackendHealth();
+            setInterval(checkBackendHealth, 5000);
+        });
+
+        // Backend Health Check
+        async function checkBackendHealth() {
+            const badge = document.getElementById('apiStatusBadge');
+            try {
+                const res = await fetch('http://localhost:8000/', { method: 'GET' });
+                if(res.ok) {
+                    badge.className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30";
+                    badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span><span>API: CONNECTED</span>`;
+                } else {
+                    throw new Error();
+                }
+            } catch(e) {
+                badge.className = "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-amber-500/10 text-amber-400 border border-amber-500/30";
+                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>API: DEMO MODE</span>`;
+            }
+        }
+
+        // Seed Initial Mock Threat Logs
+        function seedInitialData() {
+            const mockTypes = ['SSH_BRUTE_FORCE', 'SQL_INJECTION', 'DDOS_SYN_FLOOD', 'MALWARE_UPLOAD'];
+            const severities = ['CRITICAL', 'HIGH', 'MEDIUM'];
+            const targets = ['auth-gateway-01', 'db-cluster-node', 'web-frontend-pod', 'payment-api-02'];
+
+            for (let i = 0; i < 10; i++) {
+                const type = mockTypes[Math.floor(Math.random() * mockTypes.length)];
+                const sev = severities[Math.floor(Math.random() * severities.length)];
+                const ip = `192.168.1.${Math.floor(Math.random() * 200) + 10}`;
+                const target = targets[Math.floor(Math.random() * targets.length)];
+                
+                threats.push({
+                    timestamp: new Date(Date.now() - (i * 45000)).toISOString().substr(11, 8),
+                    severity: sev,
+                    attack_type: type,
+                    source_ip: ip,
+                    target_asset: target,
+                    action: sev === 'CRITICAL' ? 'Container Quarantined' : (sev === 'HIGH' ? 'IP Blocked (iptables)' : 'Rate Limited')
+                });
+            }
+            updateUI();
+        }
+
+        // Render Threat Feed & Containment Tables
+        function updateUI() {
+            const feedBody = document.getElementById('threatFeedBody');
+            feedBody.innerHTML = '';
+
+            threats.forEach(t => {
+                let sevClass = "bg-cyan-500/10 text-cyan-400 border-cyan-500/30";
+                if(t.severity === 'CRITICAL') sevClass = "bg-rose-500/20 text-rose-400 border-rose-500/30 glow-red";
+                if(t.severity === 'HIGH') sevClass = "bg-amber-500/10 text-amber-400 border-amber-500/30";
+
+                const row = document.createElement('tr');
+                row.className = "hover:bg-soc-border/30 transition";
+                row.innerHTML = `
+                    <td class="p-3 text-slate-400">${t.timestamp}</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold border ${sevClass}">${t.severity}</span></td>
+                    <td class="p-3 text-white font-semibold">${t.attack_type}</td>
+                    <td class="p-3 text-cyan-400">${t.source_ip}</td>
+                    <td class="p-3 text-slate-300">${t.target_asset}</td>
+                    <td class="p-3 text-emerald-400 flex items-center gap-1.5">
+                        <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> ${t.action}
+                    </td>
+                `;
+                feedBody.appendChild(row);
+            });
+
+            document.getElementById('threatCountBadge').innerText = `${threats.length} ALERTS`;
+            document.getElementById('metricNeutralized').innerText = threats.length;
+            
+            updateCharts();
+            lucide.createIcons();
+        }
+
+        // Render Active Containment Controls Tables
+        function renderTables() {
+            // Render Blocked IPs
+            const ipBody = document.getElementById('blockedIpTable');
+            ipBody.innerHTML = '';
+            blockedIPs.forEach((b, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-soc-border/20";
+                tr.innerHTML = `
+                    <td class="p-2 text-rose-400 font-bold">${b.ip}</td>
+                    <td class="p-2 text-slate-400">${b.reason}</td>
+                    <td class="p-2 text-slate-500">${b.age}</td>
+                    <td class="p-2 text-right">
+                        <button onclick="unblockIP(${idx})" class="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[10px] transition">
+                            UNBLOCK
+                        </button>
+                    </td>
+                `;
+                ipBody.appendChild(tr);
+            });
+
+            // Render Containers
+            const cBody = document.getElementById('containerTable');
+            cBody.innerHTML = '';
+            isolatedContainers.forEach((c, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-soc-border/20";
+                tr.innerHTML = `
+                    <td class="p-2 text-amber-400 font-bold">${c.id}</td>
+                    <td class="p-2"><span class="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[10px]">${c.status}</span></td>
+                    <td class="p-2 text-slate-400">${c.trigger}</td>
+                    <td class="p-2 text-right">
+                        <button onclick="resumeContainer(${idx})" class="px-2 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded text-[10px] transition">
+                            RESUME
+                        </button>
+                    </td>
+                `;
+                cBody.appendChild(tr);
+            });
+
+            document.getElementById('metricFirewall').innerText = `${blockedIPs.length} ACTIVE`;
+            document.getElementById('metricIsolated').innerText = isolatedContainers.length;
+        }
+
+       async function triggerSimulatedAttack() {
+    const attackType = document.getElementById('simAttackType').value;
+    const severity = document.getElementById('simSeverity').value;
+    const target = document.getElementById('simTarget').value;
+    const generatedIP = `192.168.1.${Math.floor(Math.random() * 150) + 50}`;
+
+    // Pastikan kelima properti ini ada agar lolos validasi Pydantic di backend
+    const payload = {
+        source: "Attack Simulator Dashboard",
+        source_ip: generatedIP,
+        attack_type: attackType,
+        target_asset: target,
+        severity: severity
+    };
+
+    let actionTaken = severity === 'CRITICAL' ? 'Container Quarantined' : (severity === 'HIGH' ? 'IP Blocked (iptables)' : 'Rate Limited');
+
+    try {
+        const res = await fetch('http://localhost:8000/api/v1/alert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if(res.ok) {
+            const data = await res.json();
+            actionTaken = data.action_taken;
+        }
+    } catch(e) {
+        console.warn("Backend offline, using fallback mode.");
+    }
+// --- LIVE API INTEGRATION FUNCTIONS ---
+
+// 1. Trigger DNN Resource Anomaly Evaluation from UI
+async function evaluateDNNModel() {
+    try {
+        const res = await fetch('http://localhost:8000/api/v1/detect/dnn-anomaly', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cpu_usage: 89.4, gpu_usage: 78.2, ram_usage: 91.0, network_pps: 320.5 })
+        });
+        const result = await res.json();
+        alert(`DNN Autoencoder Result:\nStatus: ${result.status}\nReconstruction MSE Loss: ${result.reconstruction_mse_loss}`);
+    } catch (err) {
+        alert("Failed to connect to FastAPI backend for DNN. Is uvicorn running on port 8000?");
+    }
+}
+
+// 2. Trigger FIM Hash Audit via Backend
+async function runRealFIMAudit() {
+    try {
+        const res = await fetch('http://localhost:8000/api/v1/detect/fim-audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_path: "/app/main.py", current_hash: "8f4c29b1029481a7bcf89104bf7c8911", trigger_mode: "hash_change" })
+        });
+        const result = await res.json();
+        alert(`FIM Audit Response:\nTrigger Mode: ${result.trigger_mode.toUpperCase()}\nTamper Detected: ${result.tamper_detected}\nPlaybook: ${result.playbook_response}`);
+    } catch (err) {
+        alert("Failed to connect to FastAPI backend for FIM. Is uvicorn running on port 8000?");
+    }
+}
+            // Prepend new incident
+            const newIncident = {
+                timestamp: new Date().toISOString().substr(11, 8),
+                severity: severity,
+                attack_type: attackType,
+                source_ip: generatedIP,
+                target_asset: target,
+                action: actionTaken
+            };
+
+            threats.unshift(newIncident);
+            
+            // Manage Containment Lists based on severity
+            if(severity === 'HIGH' || severity === 'CRITICAL') {
+                blockedIPs.unshift({ ip: generatedIP, reason: attackType, age: 'Just now' });
+            }
+            if(severity === 'CRITICAL') {
+                isolatedContainers.unshift({ id: target, status: 'ISOLATED', trigger: attackType });
+            }
+
+            updateUI();
+            renderTables();
+            showToast(`[${severity}] ${attackType} detected from ${generatedIP}. Remediation executed!`);
+        }
+
+        // Unblock IP Handler
+        function unblockIP(idx) {
+            const removed = blockedIPs.splice(idx, 1)[0];
+            renderTables();
+            showToast(`Firewall Rule Removed: IP ${removed.ip} unblocked.`, 'info');
+        }
+
+        // Resume Container Handler
+        function resumeContainer(idx) {
+            const removed = isolatedContainers.splice(idx, 1)[0];
+            renderTables();
+            showToast(`Container Restored: ${removed.id} resumed normal operation.`, 'info');
+        }
+
+        // Toggle Automated Stress Test Simulator
+        function toggleAutoAttack() {
+            const btn = document.getElementById('btnAutoSim');
+            if(autoSimInterval) {
+                clearInterval(autoSimInterval);
+                autoSimInterval = null;
+                btn.innerText = "AUTO: OFF";
+                btn.className = "bg-soc-bg border border-soc-border hover:bg-slate-800 text-slate-300 font-mono text-xs py-2 px-3 rounded transition";
+            } else {
+                autoSimInterval = setInterval(triggerSimulatedAttack, 3000);
+                btn.innerText = "AUTO: ON";
+                btn.className = "bg-rose-500/20 border border-rose-500/40 text-rose-400 font-mono text-xs py-2 px-3 rounded transition animate-pulse";
+            }
+        }
+
+        // Toast Notifications
+        function showToast(msg, type = 'danger') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `p-3 rounded-lg border text-xs font-mono shadow-xl transition-all duration-300 transform translate-y-2 pointer-events-auto flex items-start justify-between gap-2 ${
+                type === 'danger' ? 'bg-rose-950/90 border-rose-500/50 text-rose-200' : 'bg-slate-900/90 border-cyan-500/50 text-cyan-200'
+            }`;
+            toast.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <i data-lucide="${type === 'danger' ? 'alert-triangle' : 'info'}" class="w-4 h-4 text-${type === 'danger' ? 'rose' : 'cyan'}-400 shrink-0"></i>
+                    <span>${msg}</span>
+                </div>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-4');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        // Initialize Visual Metric Charts using Chart.js
+        function initCharts() {
+            // 1. Attack Type Bar Chart
+            const ctx1 = document.getElementById('attackTypeChart').getContext('2d');
+            attackChartInstance = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: ['SSH Brute', 'SQLi', 'DDoS SYN', 'Malware'],
+                    datasets: [{
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#3b82f6', '#f59e0b', '#f43f5e', '#10b981'],
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 9 } } },
+                        y: { grid: { color: '#1f293d' }, ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 9 } } }
+                    }
+                }
+            });
+
+            // 2. Severity Pie Chart
+            const ctx2 = document.getElementById('severityChart').getContext('2d');
+            severityChartInstance = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: ['CRITICAL', 'HIGH', 'MEDIUM'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#f43f5e', '#f59e0b', '#06b6d4'],
+                        borderWidth: 2,
+                        borderColor: '#111827'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update Charts Data dynamically
+        function updateCharts() {
+            if(!attackChartInstance || !severityChartInstance) return;
+
+            const typeCounts = { 'SSH_BRUTE_FORCE': 0, 'SQL_INJECTION': 0, 'DDOS_SYN_FLOOD': 0, 'MALWARE_UPLOAD': 0 };
+            const sevCounts = { 'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0 };
+
+            threats.forEach(t => {
+                if(typeCounts[t.attack_type] !== undefined) typeCounts[t.attack_type]++;
+                if(sevCounts[t.severity] !== undefined) sevCounts[t.severity]++;
+            });
+
+            attackChartInstance.data.datasets[0].data = [
+                typeCounts['SSH_BRUTE_FORCE'],
+                typeCounts['SQL_INJECTION'],
+                typeCounts['DDOS_SYN_FLOOD'],
+                typeCounts['MALWARE_UPLOAD']
+            ];
+            attackChartInstance.update();
+
+            severityChartInstance.data.datasets[0].data = [
+                sevCounts['CRITICAL'],
+                sevCounts['HIGH'],
+                sevCounts['MEDIUM']
+            ];
+            severityChartInstance.update();
+        }
+    </script>
+</body>
+</html>
